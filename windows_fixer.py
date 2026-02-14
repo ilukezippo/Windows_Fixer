@@ -35,11 +35,7 @@ def resource_path(relative_path: str) -> str:
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
-# Set window icon (works in Python + EXE)
-try:
-    root.iconbitmap(resource_path("icon.ico"))
-except Exception as e:
-    print("Icon load failed:", e)
+
 
 def set_app_icon(root):
     ico = resource_path("icon.ico")  # your icon file
@@ -107,12 +103,16 @@ def make_donate_image(w=160, h=44):
 
 
 def play_success_sound():
-    wav = resource_path("Success.wav")
-    if os.path.exists(wav):
-        try:
+    # Match your App Updater behavior (works in .py and in EXE)
+    wav = resource_path("success.wav")
+    try:
+        if os.path.exists(wav):
             winsound.PlaySound(wav, winsound.SND_FILENAME | winsound.SND_ASYNC)
-        except Exception:
-            pass
+        else:
+            winsound.MessageBeep(winsound.MB_ICONASTERISK)
+    except Exception:
+        pass
+
 
 
 # -------------------------

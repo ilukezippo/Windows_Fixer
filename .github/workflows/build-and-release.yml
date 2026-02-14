@@ -43,6 +43,10 @@ jobs:
           if (Test-Path "Success.wav") {
             $args += @("--add-data", "Success.wav;.")
           }
+          
+          if (Test-Path "success.wav") {
+            $args += @("--add-data", "success.wav;.")
+          }
 
           if (Test-Path "kuwait.png") {
             $args += @("--add-data", "kuwait.png;.")
