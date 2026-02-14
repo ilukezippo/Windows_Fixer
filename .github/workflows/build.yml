@@ -1,0 +1,37 @@
+name: Build Windows Fixer EXE
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        pip install pillow pyinstaller
+
+    - name: Build EXE with PyInstaller
+      run: |
+        pyinstaller --onefile --noconsole ^
+          --icon=icon.ico ^
+          --add-data "Success.wav;." ^
+          --add-data "kuwait.png;." ^
+          windows_fixer.py
+
+    - name: Upload EXE artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Windows_Fixer_EXE
+        path: dist/windows_fixer.exe

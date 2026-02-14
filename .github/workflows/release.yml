@@ -1,0 +1,85 @@
+name: Build & Release Windows Fixer
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pillow pyinstaller
+
+      - name: Detect version from tag
+        id: ver
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Build EXE (PyInstaller)
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.ver.outputs.tag }}"
+          $version = $tag.TrimStart("v")
+
+          # Build arguments
+          $args = @(
+            "--onefile",
+            "--noconsole",
+            "--name", "WindowsFixer_$tag",
+            "--icon", "icon.ico"
+          )
+
+          # Add data files only if they exist (prevents workflow failures)
+          if (Test-Path "Success.wav") { $args += @("--add-data", "Success.wav;.") }
+          if (Test-Path "kuwait.png")  { $args += @("--add-data", "kuwait.png;.") }
+
+          # Run PyInstaller
+          pyinstaller @args windows_fixer.py
+
+          # Rename output to friendly name
+          New-Item -ItemType Directory -Force -Path "release_out" | Out-Null
+          $src = Join-Path "dist" ("WindowsFixer_$tag.exe")
+          $dst = Join-Path "release_out" ("WindowsFixer_$tag.exe")
+          Copy-Item $src $dst -Force
+
+      - name: Create SHA256 checksum
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.ver.outputs.tag }}"
+          $exe = "release_out\WindowsFixer_$tag.exe"
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  WindowsFixer_$tag.exe" | Out-File "release_out\SHA256SUMS.txt" -Encoding ascii
+
+      - name: Zip release bundle
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.ver.outputs.tag }}"
+          $zip = "WindowsFixer_$tag_Windows_x64.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path "release_out\*" -DestinationPath $zip -Force
+
+      - name: Create GitHub Release + upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            WindowsFixer_${{ steps.ver.outputs.tag }}_Windows_x64.zip
+          generate_release_notes: true
