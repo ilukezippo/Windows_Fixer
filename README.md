@@ -1,4 +1,4 @@
-🛠️ Windows Fixer v1.0.0
+🛠️ Windows Fixer
 
 Windows Fixer is a lightweight Windows repair and cleanup tool with a modern GUI.
 
@@ -20,6 +20,7 @@ Drive selection dropdown
 Scan or Fix mode
 
 Reset Network Stack (Winsock + TCP/IP)
+
 
 🧹 Cleanup Tools
 
@@ -53,11 +54,7 @@ Optional "Always Run as Admin"
 
 English / Arabic language support
 
-Plays Success.wav when completed
 
-Custom app icon
-
-About window with Donate button
 
 📦 Requirements
 
