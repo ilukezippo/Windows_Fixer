@@ -14,12 +14,12 @@ import re
 import urllib.request
 
 from io import BytesIO
-from PIL import Image, ImageDraw  # pillow installed
+from PIL import Image, ImageDraw
 import winsound
 
 APP_ID = "WindowsFixer"
 APP_VERSION = "v1.0.0"
-BUILD_DATE = date.today().isoformat()  # shown in About
+BUILD_DATE = date.today().isoformat()
 
 DONATE_PAGE = "https://buymeacoffee.com/ilukezippo"
 GITHUB_PAGE = "https://github.com/ilukezippo/Windows_Fixer"
@@ -30,9 +30,6 @@ WIN_W = 1280
 WIN_H = 980
 
 
-# -------------------------
-# resource helpers (PyInstaller friendly)
-# -------------------------
 def resource_path(relative_path: str) -> str:
     try:
         base_path = sys._MEIPASS  # type: ignore[attr-defined]
@@ -61,7 +58,7 @@ def apply_icon_to_tlv(tlv, icon):
 
 
 def load_flag_image():
-    png = resource_path("kuwait.png")  # optional
+    png = resource_path("kuwait.png")
     if os.path.exists(png):
         try:
             return tk.PhotoImage(file=png)
@@ -106,30 +103,37 @@ def make_donate_image(w=160, h=44):
     return tk.PhotoImage(data=bio.read())
 
 
-def play_success_sound():
-    # Use the helper to find the path in the temp folder
-    # We check for lowercase as the primary target
-    wav = resource_path("success.wav")
+# ✅ FIX: log + run safely (we will call this from main UI thread)
+def play_success_sound(log_cb=None):
+    wav1 = resource_path("success.wav")
+    wav2 = resource_path("Success.wav")
 
-    # Fallback check for capitalized version
-    if not os.path.exists(wav):
-        wav = resource_path("Success.wav")
+    wav = wav1 if os.path.exists(wav1) else wav2
+
+    if log_cb:
+        log_cb(f"[SOUND] Trying: {wav}")
+        log_cb(f"[SOUND] Exists success.wav: {os.path.exists(wav1)}")
+        log_cb(f"[SOUND] Exists Success.wav: {os.path.exists(wav2)}")
 
     try:
         if os.path.exists(wav):
-            # Use SND_FILENAME and SND_ASYNC to play without freezing the UI
+            # Purge any previous sound + play async
+            winsound.PlaySound(None, winsound.SND_PURGE)
             winsound.PlaySound(wav, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            if log_cb:
+                log_cb("[SOUND] PlaySound called.")
+            return True
         else:
-            # Fallback to a system beep if the file is missing
             winsound.MessageBeep(winsound.MB_ICONASTERISK)
-    except Exception:
-        # Silent fail to prevent the app from crashing if audio drivers have issues
-        pass
+            if log_cb:
+                log_cb("[SOUND] WAV not found -> played system beep.")
+            return False
+    except Exception as e:
+        if log_cb:
+            log_cb(f"[SOUND] Failed: {e}")
+        return False
 
 
-# -------------------------
-# Settings
-# -------------------------
 def _settings_path():
     base = os.environ.get("APPDATA") or os.path.expanduser("~")
     folder = os.path.join(base, APP_ID)
@@ -157,9 +161,6 @@ def save_settings(data: dict):
         pass
 
 
-# -------------------------
-# Admin
-# -------------------------
 def is_admin() -> bool:
     try:
         return ctypes.windll.shell32.IsUserAnAdmin() != 0
@@ -169,14 +170,10 @@ def is_admin() -> bool:
 
 def relaunch_as_admin():
     params = " ".join([f'"{a}"' for a in sys.argv])
-    # SW_HIDE = 0 to reduce flashing in some cases
     ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 0)
     sys.exit(0)
 
 
-# -------------------------
-# Drives
-# -------------------------
 def list_drives():
     drives = []
     bitmask = ctypes.windll.kernel32.GetLogicalDrives()
@@ -189,9 +186,6 @@ def list_drives():
     return drives or ["C:"]
 
 
-# -------------------------
-# Cleanup helpers
-# -------------------------
 def safe_rmtree(path: str, log_cb):
     try:
         if os.path.isdir(path) and not os.path.islink(path):
@@ -248,9 +242,6 @@ def clear_recycle_bin(log_cb):
         log_cb(f"[WARN] Could not clear Recycle Bin: {e}")
 
 
-# -------------------------
-# Command runner
-# -------------------------
 class CommandRunner:
     def __init__(self, log_cb):
         self.log_cb = log_cb
@@ -346,9 +337,6 @@ class CommandRunner:
         return "ok"
 
 
-# -------------------------
-# UI helper
-# -------------------------
 def add_option_with_desc(parent, text, desc, variable, wrap=560):
     row = ttk.Frame(parent)
     row.pack(fill="x", anchor="w", pady=(6, 0))
@@ -361,14 +349,10 @@ def add_option_with_desc(parent, text, desc, variable, wrap=560):
     return cb, lbl
 
 
-# -------------------------
-# App
-# -------------------------
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
 
-        # Hide window while building UI to avoid blank "startup" frame
         self.withdraw()
 
         self.settings = load_settings()
@@ -382,11 +366,9 @@ class App(tk.Tk):
         self.worker_thread = None
         self.running = False
 
-        # Select All
         self.var_select_all = tk.BooleanVar(value=False)
         self._select_all_guard = False
 
-        # Repair
         self.var_dism_scan = tk.BooleanVar(value=False)
         self.var_dism_restore = tk.BooleanVar(value=True)
         self.var_sfc = tk.BooleanVar(value=True)
@@ -395,7 +377,6 @@ class App(tk.Tk):
         self.var_drive = tk.StringVar(value="C:")
         self.var_reset_network = tk.BooleanVar(value=False)
 
-        # Cleanup
         self.var_temp = tk.BooleanVar(value=True)
         self.var_prefetch = tk.BooleanVar(value=False)
         self.var_recycle_bin = tk.BooleanVar(value=True)
@@ -417,17 +398,15 @@ class App(tk.Tk):
             self.var_wu_cache,
         ]
 
-        # Progress
         self.var_step_text = tk.StringVar(value="Idle")
         self.total_steps = 0
 
-        self.title(self.title_text())
+        self.title(f"Windows Fixer {APP_VERSION}")
         self.geometry(f"{WIN_W}x{WIN_H}")
         self.minsize(1180, 880)
 
         self.create_menu()
         self.create_ui()
-
         self.refresh_drive_list()
 
         self.var_chkdsk.trace_add("write", lambda *_: self.update_chkdsk_controls())
@@ -439,24 +418,16 @@ class App(tk.Tk):
         self.var_select_all.trace_add("write", lambda *_: self.on_select_all_toggled())
 
         self.after(80, self.flush_log_queue)
-
-        # Apply language after widgets exist
         self.apply_language()
         self.update_select_all_state()
 
-        # Update check on startup (silent if latest)
         self.after(800, lambda: self.check_latest_app_version_async(show_if_latest=False))
 
-        # Show window when ready
-        self.update_idletasks()
-        self.center_window()
-        self.after(50, self.center_window)
+        # ✅ FIX: show first, then center (final)
         self.deiconify()
+        self.after(50, self.center_window)
         self.lift()
         self.focus_force()
-
-    def title_text(self):
-        return f"Windows Fixer {APP_VERSION}"
 
     # ---------- Update checker ----------
     def _parse_ver_tuple(self, v: str):
@@ -468,10 +439,7 @@ class App(tk.Tk):
     def check_latest_app_version_async(self, show_if_latest: bool = False):
         def worker():
             try:
-                req = urllib.request.Request(
-                    GITHUB_API_LATEST,
-                    headers={"User-Agent": "Windows-Fixer"},
-                )
+                req = urllib.request.Request(GITHUB_API_LATEST, headers={"User-Agent": "Windows-Fixer"})
                 with urllib.request.urlopen(req, timeout=10) as r:
                     data = json.loads(r.read().decode("utf-8", "replace"))
 
@@ -484,27 +452,15 @@ class App(tk.Tk):
                             if self.lang == "en"
                             else f"يوجد إصدار أحدث {tag}.\n\nفتح صفحة الإصدارات؟"
                         )
-                        if messagebox.askyesno(
-                            "Update" if self.lang == "en" else "تحديث",
-                            msg,
-                            parent=self,
-                        ):
+                        if messagebox.askyesno("Update" if self.lang == "en" else "تحديث", msg, parent=self):
                             webbrowser.open(GITHUB_RELEASES_PAGE)
 
                     self.after(0, _ask)
                 else:
                     if show_if_latest:
                         def _info():
-                            msg = (
-                                "You already have the latest version."
-                                if self.lang == "en"
-                                else "أنت تستخدم أحدث إصدار."
-                            )
-                            messagebox.showinfo(
-                                "Update" if self.lang == "en" else "تحديث",
-                                msg,
-                                parent=self,
-                            )
+                            msg = "You already have the latest version." if self.lang == "en" else "أنت تستخدم أحدث إصدار."
+                            messagebox.showinfo("Update" if self.lang == "en" else "تحديث", msg, parent=self)
                         self.after(0, _info)
 
             except Exception:
@@ -515,11 +471,7 @@ class App(tk.Tk):
                             if self.lang == "en"
                             else "تعذر التحقق من التحديثات. حاول لاحقاً."
                         )
-                        messagebox.showwarning(
-                            "Update" if self.lang == "en" else "تحديث",
-                            msg,
-                            parent=self,
-                        )
+                        messagebox.showwarning("Update" if self.lang == "en" else "تحديث", msg, parent=self)
                     self.after(0, _err)
 
         threading.Thread(target=worker, daemon=True).start()
@@ -570,8 +522,6 @@ class App(tk.Tk):
     def on_toggle_always_admin(self):
         self.settings["always_admin"] = bool(self.var_always_admin.get())
         save_settings(self.settings)
-
-        # if enabled and not admin -> relaunch immediately (no dialogs)
         if self.var_always_admin.get() and not is_admin():
             relaunch_as_admin()
 
@@ -671,35 +621,27 @@ class App(tk.Tk):
         return (ar if self.lang == "ar" else en).get(key, key)
 
     def apply_language(self):
-        self.title(self.title_text())
-
         self.lbl_admin.config(text=(self.t("admin_yes") if is_admin() else self.t("admin_no")))
         self.btn_admin.config(text=self.t("run_admin"))
-
         self.opts_group.config(text=self.t("choose_fix"))
         self.cb_select_all.config(text=self.t("select_all"))
         self.lbl_repair.config(text=self.t("repair"))
         self.lbl_cleanup.config(text=self.t("cleanup"))
-
         self.cb_dism_scan.config(text=self.t("opt_dism_scan"))
         self.desc_dism_scan.config(text=self.t("desc_dism_scan"))
         self.cb_dism_restore.config(text=self.t("opt_dism_restore"))
         self.desc_dism_restore.config(text=self.t("desc_dism_restore"))
         self.cb_sfc.config(text=self.t("opt_sfc"))
         self.desc_sfc.config(text=self.t("desc_sfc"))
-
         self.cb_chkdsk.config(text=self.t("opt_chkdsk"))
         self.desc_chkdsk.config(text=self.t("desc_chkdsk"))
-
         self.cb_reset_net.config(text=self.t("opt_reset_net"))
         self.desc_reset_net.config(text=self.t("desc_reset_net"))
-
         self.lbl_drive.config(text=self.t("drive"))
         self.btn_drive_refresh.config(text=self.t("refresh"))
         self.lbl_mode.config(text=self.t("mode"))
         self.rb_scan.config(text=self.t("scan_only"))
         self.rb_fix.config(text=self.t("fix_f"))
-
         self.cb_temp.config(text=self.t("opt_temp"))
         self.desc_temp.config(text=self.t("desc_temp"))
         self.cb_prefetch.config(text=self.t("opt_prefetch"))
@@ -712,18 +654,15 @@ class App(tk.Tk):
         self.desc_comp.config(text=self.t("desc_comp"))
         self.cb_wu.config(text=self.t("opt_wu"))
         self.desc_wu.config(text=self.t("desc_wu"))
-
         self.prog_group.config(text=self.t("progress"))
         self.log_group.config(text=self.t("log"))
-
         self.btn_start.config(text=self.t("start"))
         self.btn_skip.config(text=self.t("skip"))
         self.btn_cancel.config(text=self.t("cancel"))
         self.btn_clear.config(text=self.t("clear_log"))
-
         self.refresh_admin_ui()
 
-    # ---------- Select All logic ----------
+    # ---------- Select All ----------
     def on_select_all_toggled(self):
         if self._select_all_guard:
             return
@@ -946,7 +885,6 @@ class App(tk.Tk):
         if self.running:
             return
 
-        # allow Start after Cancel
         self.runner.reset_all()
 
         steps = self.build_steps()
@@ -963,7 +901,7 @@ class App(tk.Tk):
         self.var_step_text.set("Starting...")
 
         self.set_running(True)
-        self.enqueue_log(f"--- {self.title_text()} ---")
+        self.enqueue_log(f"--- Windows Fixer {APP_VERSION} ---")
         self.enqueue_log("Starting...")
 
         self.worker_thread = threading.Thread(target=self.worker, args=(steps,), daemon=True)
@@ -1085,7 +1023,9 @@ class App(tk.Tk):
 
             self.finish_progress("Done")
             self.enqueue_log("All selected tasks finished.")
-            play_success_sound()
+
+            # ✅ FIX: play sound on main UI thread (not worker thread)
+            self.after(200, lambda: play_success_sound(self.enqueue_log))
 
         except Exception as e:
             self.enqueue_log(f"[ERROR] {e}")
@@ -1122,21 +1062,6 @@ class App(tk.Tk):
             tk.Label(row, image=flag).pack(side="left", padx=(6, 0))
             win._flag = flag
 
-        email_row = ttk.Frame(frame)
-        email_row.pack(pady=(6, 0))
-        tk.Label(email_row, text=("For any feedback contact: " if self.lang == "en" else "للملاحظات تواصل على: ")).pack(
-            side="left"
-        )
-        email_lbl = tk.Label(
-            email_row,
-            text="ilukezippo@gmail.com",
-            fg="#1a73e8",
-            cursor="hand2",
-            font=("Segoe UI", 9, "underline"),
-        )
-        email_lbl.pack(side="left")
-        email_lbl.bind("<Button-1>", lambda e: webbrowser.open("mailto:ilukezippo@gmail.com"))
-
         link_row = ttk.Frame(frame)
         link_row.pack(pady=(8, 0))
         tk.Label(link_row, text=("Info and Latest Updates at " if self.lang == "en" else "المعلومات وآخر التحديثات: ")).pack(
@@ -1169,26 +1094,16 @@ class App(tk.Tk):
             command=lambda: webbrowser.open(DONATE_PAGE),
         ).pack(pady=(12, 0))
 
-        ttk.Button(
-            frame,
-            text=("Check for Update" if self.lang == "en" else "التحقق من التحديث"),
-            command=self.manual_check_for_update,
-        ).pack(pady=(6, 6))
-
         ttk.Button(frame, text=("Close" if self.lang == "en" else "إغلاق"), command=win.destroy).pack(pady=(10, 0))
         self.center_child(win)
 
 
-# -------------------------
-# Main
-# -------------------------
 if __name__ == "__main__":
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except Exception:
         pass
 
-    # Auto-run as admin BEFORE any Tk window (if enabled)
     settings = load_settings()
     if bool(settings.get("always_admin", False)) and not is_admin():
         relaunch_as_admin()
