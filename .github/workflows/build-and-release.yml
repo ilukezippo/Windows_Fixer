@@ -33,11 +33,20 @@ jobs:
           $tag = "${{ github.ref_name }}"
           if ($tag -eq "main") { $tag = "dev" }
 
-          $args = @("--onefile","--noconsole","--name","windows_fixer")
+          $args = @("--onefile", "--noconsole", "--name", "windows_fixer")
 
-          if (Test-Path "icon.ico")    { $args += @("--icon","icon.ico") }
-          if (Test-Path "Success.wav") { $args += @("--add-data","Success.wav;.") }
-          if (Test-Path "kuwait.png")  { $args += @("--add-data","kuwait.png;.") }
+          if (Test-Path "icon.ico") {
+            $args += @("--icon", "icon.ico")
+            $args += @("--add-data", "icon.ico;.")
+          }
+
+          if (Test-Path "Success.wav") {
+            $args += @("--add-data", "Success.wav;.")
+          }
+
+          if (Test-Path "kuwait.png") {
+            $args += @("--add-data", "kuwait.png;.")
+          }
 
           pyinstaller @args windows_fixer.py
 

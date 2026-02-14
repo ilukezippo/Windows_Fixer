@@ -31,10 +31,21 @@ WIN_H = 900
 # -------------------------
 def resource_path(relative_path: str) -> str:
     try:
-        base_path = sys._MEIPASS  # type: ignore
+        base_path = sys._MEIPASS  # PyInstaller temp folder
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
+
+root = tk.Tk()
+
+# Set window icon (works in Python + EXE)
+try:
+    root.iconbitmap(resource_path("icon.ico"))
+except Exception as e:
+    print("Icon load failed:", e)
+
+
+
 
 
 def set_app_icon(root):
