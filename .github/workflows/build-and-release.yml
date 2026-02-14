@@ -31,16 +31,21 @@ jobs:
         shell: pwsh
         run: |
           $args = @("--onefile", "--noconsole", "--name", "windows_fixer")
-          
-          # Force a specific name for the bundled data
-          if (Test-Path "icon.ico") { $args += @("--icon", "icon.ico"); $args += @("--add-data", "icon.ico;.") }
-          if (Test-Path "kuwait.png") { $args += @("--add-data", "kuwait.png;.") }
-          
-          # Bundle the wav file - check for both but bundle as 'success.wav'
-          if (Test-Path "Success.wav") {
-            $args += @("--add-data", "Success.wav;.")
-          } elseif (Test-Path "success.wav") {
+
+          # Icon + bundled assets
+          if (Test-Path "icon.ico") {
+            $args += @("--icon", "icon.ico")
+            $args += @("--add-data", "icon.ico;.")
+          }
+          if (Test-Path "kuwait.png") {
+            $args += @("--add-data", "kuwait.png;.")
+          }
+
+          # Bundle wav into EXE as fallback
+          if (Test-Path "success.wav") {
             $args += @("--add-data", "success.wav;.")
+          } elseif (Test-Path "Success.wav") {
+            $args += @("--add-data", "Success.wav;.")
           }
 
           pyinstaller @args windows_fixer.py
@@ -54,10 +59,19 @@ jobs:
             Copy-Item "dist\windows_fixer.exe" "release_out\WindowsFixer_dev.exe" -Force
           }
 
+          # ✅ Option A: Put success.wav next to the EXE (portable)
+          if (Test-Path "success.wav") {
+            Copy-Item "success.wav" "release_out\success.wav" -Force
+          } elseif (Test-Path "Success.wav") {
+            Copy-Item "Success.wav" "release_out\success.wav" -Force
+          }
+
       - name: Create SHA256
         shell: pwsh
         run: |
-          $files = Get-ChildItem "release_out\*.exe"
+          if (Test-Path "release_out\SHA256SUMS.txt") { Remove-Item "release_out\SHA256SUMS.txt" -Force }
+
+          $files = Get-ChildItem "release_out" -File
           foreach ($f in $files) {
             $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
             "$hash  $($f.Name)" | Out-File "release_out\SHA256SUMS.txt" -Append -Encoding ascii
@@ -77,14 +91,12 @@ jobs:
 
           echo "ZIP_NAME=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
 
-      # Always upload artifact (so you can download it from Actions even without a tag)
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: Windows_Fixer_Build
           path: ${{ env.ZIP_NAME }}
 
-      # Only when pushing a tag: attach zip to GitHub Release
       - name: Upload to GitHub Release (tags only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2

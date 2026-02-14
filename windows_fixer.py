@@ -31,11 +31,25 @@ WIN_H = 980
 
 
 def resource_path(relative_path: str) -> str:
+    # 1) Prefer files next to the exe (portable)
+    try:
+        if getattr(sys, "frozen", False):
+            exe_dir = os.path.dirname(sys.executable)
+        else:
+            exe_dir = os.path.dirname(os.path.abspath(__file__))
+        candidate = os.path.join(exe_dir, relative_path)
+        if os.path.exists(candidate):
+            return candidate
+    except Exception:
+        pass
+
+    # 2) Fallback to PyInstaller temp extraction
     try:
         base_path = sys._MEIPASS  # type: ignore[attr-defined]
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
+
 
 
 def set_app_icon(root):
