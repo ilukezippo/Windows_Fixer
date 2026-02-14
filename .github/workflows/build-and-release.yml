@@ -1,0 +1,89 @@
+name: Build & Release Windows Fixer
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ "v*.*.*" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pillow pyinstaller
+
+      - name: Build EXE
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -eq "main") { $tag = "dev" }
+
+          $args = @("--onefile","--noconsole","--name","windows_fixer")
+
+          if (Test-Path "icon.ico")    { $args += @("--icon","icon.ico") }
+          if (Test-Path "Success.wav") { $args += @("--add-data","Success.wav;.") }
+          if (Test-Path "kuwait.png")  { $args += @("--add-data","kuwait.png;.") }
+
+          pyinstaller @args windows_fixer.py
+
+          New-Item -ItemType Directory -Force -Path release_out | Out-Null
+
+          # Name the exe nicely for release
+          if ("${{ github.ref }}".StartsWith("refs/tags/")) {
+            Copy-Item "dist\windows_fixer.exe" "release_out\WindowsFixer_${{ github.ref_name }}.exe" -Force
+          } else {
+            Copy-Item "dist\windows_fixer.exe" "release_out\WindowsFixer_dev.exe" -Force
+          }
+
+      - name: Create SHA256
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem "release_out\*.exe"
+          foreach ($f in $files) {
+            $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($f.Name)" | Out-File "release_out\SHA256SUMS.txt" -Append -Encoding ascii
+          }
+
+      - name: Zip bundle
+        shell: pwsh
+        run: |
+          if ("${{ github.ref }}".StartsWith("refs/tags/")) {
+            $zip = "WindowsFixer_${{ github.ref_name }}_Windows_x64.zip"
+          } else {
+            $zip = "WindowsFixer_dev_Windows_x64.zip"
+          }
+
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path "release_out\*" -DestinationPath $zip -Force
+
+          echo "ZIP_NAME=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+
+      # Always upload artifact (so you can download it from Actions even without a tag)
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows_Fixer_Build
+          path: ${{ env.ZIP_NAME }}
+
+      # Only when pushing a tag: attach zip to GitHub Release
+      - name: Upload to GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ZIP_NAME }}
+          generate_release_notes: true
