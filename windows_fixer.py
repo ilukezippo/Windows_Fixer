@@ -22,8 +22,8 @@ BUILD_DATE = date.today().isoformat()  # shown in About
 DONATE_PAGE = "https://buymeacoffee.com/ilukezippo"
 GITHUB_PAGE = "https://github.com/ilukezippo/Windows_Fixer"
 
-WIN_W = 1180
-WIN_H = 900
+WIN_W = 1280
+WIN_H = 980
 
 
 # -------------------------
@@ -35,18 +35,11 @@ def resource_path(relative_path: str) -> str:
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
-
-root = tk.Tk()
-
 # Set window icon (works in Python + EXE)
 try:
     root.iconbitmap(resource_path("icon.ico"))
 except Exception as e:
     print("Icon load failed:", e)
-
-
-
-
 
 def set_app_icon(root):
     ico = resource_path("icon.ico")  # your icon file
@@ -164,8 +157,10 @@ def is_admin() -> bool:
 
 def relaunch_as_admin():
     params = " ".join([f'"{a}"' for a in sys.argv])
-    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 1)
+    # last argument: 0 = SW_HIDE (prevents the tiny flash window)
+    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 0)
     sys.exit(0)
+
 
 
 # -------------------------
@@ -359,14 +354,10 @@ def add_option_with_desc(parent, text, desc, variable, wrap=560):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-
+        self.withdraw()  # hide window during startup so you don't see a blank frame
         self.settings = load_settings()
         self.lang = self.settings.get("language", "en")
         self.var_always_admin = tk.BooleanVar(value=bool(self.settings.get("always_admin", False)))
-
-        if self.var_always_admin.get() and not is_admin():
-            if messagebox.askyesno("Administrator", "Always run as admin is enabled.\n\nRelaunch as Administrator now?"):
-                relaunch_as_admin()
 
         self.icon_path = set_app_icon(self)
 
@@ -417,7 +408,7 @@ class App(tk.Tk):
 
         self.title(self.title_text())
         self.geometry(f"{WIN_W}x{WIN_H}")
-        self.minsize(1040, 760)
+        self.minsize(1180, 880)
 
         self.create_menu()
         self.create_ui()
@@ -439,6 +430,11 @@ class App(tk.Tk):
         self.apply_language()
         self.after(50, self.center_window)
         self.update_select_all_state()
+        self.update_idletasks()
+        self.center_window()
+        self.deiconify()  # show window only when ready
+        self.lift()
+        self.focus_force()
 
     def title_text(self):
         return f"Windows Fixer {APP_VERSION}"
@@ -491,8 +487,7 @@ class App(tk.Tk):
         save_settings(self.settings)
 
         if self.var_always_admin.get() and not is_admin():
-            if messagebox.askyesno("Administrator", "Enabled.\n\nRelaunch as Administrator now?"):
-                relaunch_as_admin()
+            relaunch_as_admin()
 
     def on_change_language(self):
         self.lang = self.lang_var.get()
@@ -902,7 +897,7 @@ class App(tk.Tk):
 
         steps = self.build_steps()
         if not steps:
-            messagebox.showwarning("Nothing selected", "Select at least one task.")
+            messagebox.showwarning("Nothing selected", "Select at least one task.", parent=self)
             return
 
         self.total_steps = len(steps)
@@ -1127,4 +1122,10 @@ if __name__ == "__main__":
     except Exception:
         pass
 
+    # ✅ Auto-run as admin BEFORE creating any Tk window (prevents blank/flicker window)
+    settings = load_settings()
+    if bool(settings.get("always_admin", False)) and not is_admin():
+        relaunch_as_admin()
+
     App().mainloop()
+
