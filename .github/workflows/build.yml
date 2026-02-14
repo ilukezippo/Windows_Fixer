@@ -22,10 +22,17 @@ jobs:
       run: |
         pip install pillow pyinstaller
 
-    - name: Build EXE with PyInstaller
-      shell: pwsh
-      run: |
-    pyinstaller --onefile --noconsole --icon=icon.ico --add-data "Success.wav;." --add-data "kuwait.png;." windows_fixer.py
+      - name: Build EXE with PyInstaller
+        shell: pwsh
+        run: |
+          $args = @("--onefile","--noconsole")
+
+          if (Test-Path "icon.ico")    { $args += @("--icon","icon.ico") }
+          if (Test-Path "Success.wav") { $args += @("--add-data","Success.wav;.") }
+          if (Test-Path "kuwait.png")  { $args += @("--add-data","kuwait.png;.") }
+
+          pyinstaller @args windows_fixer.py
+
 
     - name: Upload EXE artifact
       uses: actions/upload-artifact@v4
