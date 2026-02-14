@@ -10,6 +10,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import webbrowser
 from datetime import date
+import re
+import urllib.request
 
 from io import BytesIO
 from PIL import Image, ImageDraw  # pillow installed
@@ -21,6 +23,8 @@ BUILD_DATE = date.today().isoformat()  # shown in About
 
 DONATE_PAGE = "https://buymeacoffee.com/ilukezippo"
 GITHUB_PAGE = "https://github.com/ilukezippo/Windows_Fixer"
+GITHUB_API_LATEST = "https://api.github.com/repos/ilukezippo/Windows_Fixer/releases/latest"
+GITHUB_RELEASES_PAGE = "https://github.com/ilukezippo/Windows_Fixer/releases"
 
 WIN_W = 1280
 WIN_H = 980
@@ -31,14 +35,14 @@ WIN_H = 980
 # -------------------------
 def resource_path(relative_path: str) -> str:
     try:
-        base_path = sys._MEIPASS  # PyInstaller temp folder
+        base_path = sys._MEIPASS  # type: ignore[attr-defined]
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
 
 def set_app_icon(root):
-    ico = resource_path("icon.ico")  # your icon file
+    ico = resource_path("icon.ico")
     if os.path.exists(ico):
         try:
             root.iconbitmap(ico)
@@ -103,8 +107,11 @@ def make_donate_image(w=160, h=44):
 
 
 def play_success_sound():
-    # Match your App Updater behavior (works in .py and in EXE)
+    # Match your App-Updater behavior: success.wav (lowercase) + fallback beep
     wav = resource_path("success.wav")
+    if not os.path.exists(wav):
+        wav = resource_path("Success.wav")
+
     try:
         if os.path.exists(wav):
             winsound.PlaySound(wav, winsound.SND_FILENAME | winsound.SND_ASYNC)
@@ -112,7 +119,6 @@ def play_success_sound():
             winsound.MessageBeep(winsound.MB_ICONASTERISK)
     except Exception:
         pass
-
 
 
 # -------------------------
@@ -157,10 +163,9 @@ def is_admin() -> bool:
 
 def relaunch_as_admin():
     params = " ".join([f'"{a}"' for a in sys.argv])
-    # last argument: 0 = SW_HIDE (prevents the tiny flash window)
+    # SW_HIDE = 0 to reduce flashing in some cases
     ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 0)
     sys.exit(0)
-
 
 
 # -------------------------
@@ -248,11 +253,9 @@ class CommandRunner:
         self._skip_step = False
 
     def reset_all(self):
-        # IMPORTANT: allow a new run after Cancel
         self._cancel_all = False
         self._skip_step = False
         self.current_proc = None
-
 
     def request_cancel_all(self):
         self._cancel_all = True
@@ -290,7 +293,7 @@ class CommandRunner:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-                universal_newlines=True
+                universal_newlines=True,
             )
         except Exception as e:
             self.log_cb(f"[ERROR] Failed to start command: {e}")
@@ -298,25 +301,29 @@ class CommandRunner:
             return "error"
 
         try:
-            for line in self.current_proc.stdout:
-                if self._cancel_all:
-                    self._terminate_current("Cancel requested")
-                    break
-                if self._skip_step:
-                    self._terminate_current("Skip requested")
-                    break
-                self.log_cb(line.rstrip("\n"))
+            if self.current_proc.stdout:
+                for line in self.current_proc.stdout:
+                    if self._cancel_all:
+                        self._terminate_current("Cancel requested")
+                        break
+                    if self._skip_step:
+                        self._terminate_current("Skip requested")
+                        break
+                    self.log_cb(line.rstrip("\n"))
         finally:
             try:
-                self.current_proc.stdout.close()
+                if self.current_proc and self.current_proc.stdout:
+                    self.current_proc.stdout.close()
             except Exception:
                 pass
 
         try:
-            self.current_proc.wait(timeout=10)
+            if self.current_proc:
+                self.current_proc.wait(timeout=10)
         except Exception:
             try:
-                self.current_proc.kill()
+                if self.current_proc:
+                    self.current_proc.kill()
             except Exception:
                 pass
 
@@ -354,7 +361,10 @@ def add_option_with_desc(parent, text, desc, variable, wrap=560):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.withdraw()  # hide window during startup so you don't see a blank frame
+
+        # Hide window while building UI to avoid blank "startup" frame
+        self.withdraw()
+
         self.settings = load_settings()
         self.lang = self.settings.get("language", "en")
         self.var_always_admin = tk.BooleanVar(value=bool(self.settings.get("always_admin", False)))
@@ -387,7 +397,6 @@ class App(tk.Tk):
         self.var_dism_component_cleanup = tk.BooleanVar(value=False)
         self.var_wu_cache = tk.BooleanVar(value=False)
 
-        # list of all option vars for select-all
         self._all_option_vars = [
             self.var_dism_scan,
             self.var_dism_restore,
@@ -414,12 +423,10 @@ class App(tk.Tk):
         self.create_ui()
 
         self.refresh_drive_list()
-        self.center_window()
 
         self.var_chkdsk.trace_add("write", lambda *_: self.update_chkdsk_controls())
         self.update_chkdsk_controls()
 
-        # When any option changes, update select-all state
         for v in self._all_option_vars:
             v.trace_add("write", lambda *_: self.update_select_all_state())
 
@@ -427,17 +434,88 @@ class App(tk.Tk):
 
         self.after(80, self.flush_log_queue)
 
+        # Apply language after widgets exist
         self.apply_language()
-        self.after(50, self.center_window)
         self.update_select_all_state()
+
+        # Update check on startup (silent if latest)
+        self.after(800, lambda: self.check_latest_app_version_async(show_if_latest=False))
+
+        # Show window when ready
         self.update_idletasks()
         self.center_window()
-        self.deiconify()  # show window only when ready
+        self.deiconify()
         self.lift()
         self.focus_force()
 
     def title_text(self):
         return f"Windows Fixer {APP_VERSION}"
+
+    # ---------- Update checker ----------
+    def _parse_ver_tuple(self, v: str):
+        return tuple(int(n) for n in re.findall(r"\d+", v)[:4]) or (0,)
+
+    def manual_check_for_update(self):
+        self.check_latest_app_version_async(show_if_latest=True)
+
+    def check_latest_app_version_async(self, show_if_latest: bool = False):
+        def worker():
+            try:
+                req = urllib.request.Request(
+                    GITHUB_API_LATEST,
+                    headers={"User-Agent": "Windows-Fixer"},
+                )
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    data = json.loads(r.read().decode("utf-8", "replace"))
+
+                tag = str(data.get("tag_name") or data.get("name") or "").strip()
+
+                if tag and self._parse_ver_tuple(tag) > self._parse_ver_tuple(APP_VERSION):
+                    def _ask():
+                        msg = (
+                            f"A newer version {tag} is available.\n\nOpen the releases page?"
+                            if self.lang == "en"
+                            else f"يوجد إصدار أحدث {tag}.\n\nفتح صفحة الإصدارات؟"
+                        )
+                        if messagebox.askyesno(
+                            "Update" if self.lang == "en" else "تحديث",
+                            msg,
+                            parent=self,
+                        ):
+                            webbrowser.open(GITHUB_RELEASES_PAGE)
+
+                    self.after(0, _ask)
+                else:
+                    if show_if_latest:
+                        def _info():
+                            msg = (
+                                "You already have the latest version."
+                                if self.lang == "en"
+                                else "أنت تستخدم أحدث إصدار."
+                            )
+                            messagebox.showinfo(
+                                "Update" if self.lang == "en" else "تحديث",
+                                msg,
+                                parent=self,
+                            )
+                        self.after(0, _info)
+
+            except Exception:
+                if show_if_latest:
+                    def _err():
+                        msg = (
+                            "Could not check for updates. Please try again later."
+                            if self.lang == "en"
+                            else "تعذر التحقق من التحديثات. حاول لاحقاً."
+                        )
+                        messagebox.showwarning(
+                            "Update" if self.lang == "en" else "تحديث",
+                            msg,
+                            parent=self,
+                        )
+                    self.after(0, _err)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     # ---------- Center ----------
     def center_window(self):
@@ -464,7 +542,7 @@ class App(tk.Tk):
         self.file_menu.add_checkbutton(
             label=("Always run as admin" if self.lang == "en" else "تشغيل دائم كمسؤول"),
             variable=self.var_always_admin,
-            command=self.on_toggle_always_admin
+            command=self.on_toggle_always_admin,
         )
         self.file_menu.add_separator()
 
@@ -486,6 +564,7 @@ class App(tk.Tk):
         self.settings["always_admin"] = bool(self.var_always_admin.get())
         save_settings(self.settings)
 
+        # if enabled and not admin -> relaunch immediately (no dialogs)
         if self.var_always_admin.get() and not is_admin():
             relaunch_as_admin()
 
@@ -502,25 +581,21 @@ class App(tk.Tk):
             "admin_yes": "Admin: YES",
             "admin_no": "Admin: NO (recommended)",
             "run_admin": "Run as Admin",
-
             "choose_fix": "Choose what to fix",
             "select_all": "Select All",
             "repair": "Repair",
             "cleanup": "Cleanup",
             "progress": "Progress",
             "log": "Log",
-
             "start": "Start",
             "skip": "Skip Step",
             "cancel": "Cancel",
             "clear_log": "Clear Log",
-
             "drive": "Drive:",
             "refresh": "Refresh",
             "mode": "Mode:",
             "scan_only": "Scan only",
             "fix_f": "Fix errors (/f)",
-
             "opt_dism_scan": "Check Windows Image Health (DISM ScanHealth)",
             "desc_dism_scan": "Checks for corruption in the Windows image. Useful before RestoreHealth.",
             "opt_dism_restore": "Repair Windows Image (DISM RestoreHealth)",
@@ -531,7 +606,6 @@ class App(tk.Tk):
             "desc_chkdsk": "Scans the selected drive for file system errors. Fix mode may require reboot.",
             "opt_reset_net": "Reset Network Stack (Winsock + TCP/IP)",
             "desc_reset_net": "Fixes common network issues. May require reboot or reconnecting VPN/Wi-Fi.",
-
             "opt_temp": "Clean Temporary Files",
             "desc_temp": "Deletes files from user Temp and Windows Temp. Some locked files may be skipped.",
             "opt_prefetch": "Clean Prefetch Files",
@@ -549,25 +623,21 @@ class App(tk.Tk):
             "admin_yes": "المسؤول: نعم",
             "admin_no": "المسؤول: لا (مُفضل)",
             "run_admin": "تشغيل كمسؤول",
-
             "choose_fix": "اختر عمليات الإصلاح",
             "select_all": "تحديد الكل",
             "repair": "إصلاح",
             "cleanup": "تنظيف",
             "progress": "التقدم",
             "log": "السجل",
-
             "start": "ابدأ",
             "skip": "تخطي الخطوة",
             "cancel": "إلغاء",
             "clear_log": "مسح السجل",
-
             "drive": "القرص:",
             "refresh": "تحديث",
             "mode": "الوضع:",
             "scan_only": "فحص فقط",
             "fix_f": "إصلاح الأخطاء (/f)",
-
             "opt_dism_scan": "فحص سلامة صورة ويندوز (DISM ScanHealth)",
             "desc_dism_scan": "يفحص وجود تلف في صورة النظام. مفيد قبل RestoreHealth.",
             "opt_dism_restore": "إصلاح صورة النظام (DISM RestoreHealth)",
@@ -578,7 +648,6 @@ class App(tk.Tk):
             "desc_chkdsk": "يفحص نظام الملفات في القرص المحدد. وضع الإصلاح قد يتطلب إعادة تشغيل.",
             "opt_reset_net": "إعادة ضبط الشبكة (Winsock + TCP/IP)",
             "desc_reset_net": "يعالج مشاكل الشبكة الشائعة. قد يتطلب إعادة تشغيل أو إعادة الاتصال.",
-
             "opt_temp": "تنظيف الملفات المؤقتة",
             "desc_temp": "يحذف ملفات Temp للمستخدم و Windows Temp. قد يتم تخطي الملفات المقفلة.",
             "opt_prefetch": "تنظيف ملفات Prefetch",
@@ -605,15 +674,16 @@ class App(tk.Tk):
         self.lbl_repair.config(text=self.t("repair"))
         self.lbl_cleanup.config(text=self.t("cleanup"))
 
-        # Repair
         self.cb_dism_scan.config(text=self.t("opt_dism_scan"))
         self.desc_dism_scan.config(text=self.t("desc_dism_scan"))
         self.cb_dism_restore.config(text=self.t("opt_dism_restore"))
         self.desc_dism_restore.config(text=self.t("desc_dism_restore"))
         self.cb_sfc.config(text=self.t("opt_sfc"))
         self.desc_sfc.config(text=self.t("desc_sfc"))
+
         self.cb_chkdsk.config(text=self.t("opt_chkdsk"))
         self.desc_chkdsk.config(text=self.t("desc_chkdsk"))
+
         self.cb_reset_net.config(text=self.t("opt_reset_net"))
         self.desc_reset_net.config(text=self.t("desc_reset_net"))
 
@@ -623,7 +693,6 @@ class App(tk.Tk):
         self.rb_scan.config(text=self.t("scan_only"))
         self.rb_fix.config(text=self.t("fix_f"))
 
-        # Cleanup
         self.cb_temp.config(text=self.t("opt_temp"))
         self.desc_temp.config(text=self.t("desc_temp"))
         self.cb_prefetch.config(text=self.t("opt_prefetch"))
@@ -662,7 +731,6 @@ class App(tk.Tk):
     def update_select_all_state(self):
         if self._select_all_guard:
             return
-        # checked only if ALL options are True
         all_on = all(bool(v.get()) for v in self._all_option_vars)
         self._select_all_guard = True
         try:
@@ -684,7 +752,6 @@ class App(tk.Tk):
         self.opts_group = ttk.LabelFrame(self, text="", padding=12)
         self.opts_group.pack(fill="x", padx=12, pady=8)
 
-        # Select All row (top)
         sa_row = ttk.Frame(self.opts_group)
         sa_row.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
         self.cb_select_all = ttk.Checkbutton(sa_row, text="", variable=self.var_select_all)
@@ -699,12 +766,10 @@ class App(tk.Tk):
         self.lbl_repair = ttk.Label(left, text="", font=("Segoe UI", 10, "bold"))
         self.lbl_repair.pack(anchor="w")
 
-        # Repair options
         self.cb_dism_scan, self.desc_dism_scan = add_option_with_desc(left, "", "", self.var_dism_scan, wrap=640)
         self.cb_dism_restore, self.desc_dism_restore = add_option_with_desc(left, "", "", self.var_dism_restore, wrap=640)
         self.cb_sfc, self.desc_sfc = add_option_with_desc(left, "", "", self.var_sfc, wrap=640)
 
-        # CHKDSK row
         ch_row = ttk.Frame(left)
         ch_row.pack(fill="x", anchor="w", pady=(6, 0))
         self.cb_chkdsk = ttk.Checkbutton(ch_row, text="", variable=self.var_chkdsk)
@@ -736,7 +801,6 @@ class App(tk.Tk):
 
         self.cb_reset_net, self.desc_reset_net = add_option_with_desc(left, "", "", self.var_reset_network, wrap=640)
 
-        # Cleanup
         self.lbl_cleanup = ttk.Label(right, text="", font=("Segoe UI", 10, "bold"))
         self.lbl_cleanup.pack(anchor="w")
 
@@ -750,14 +814,12 @@ class App(tk.Tk):
         self.opts_group.grid_columnconfigure(0, weight=1)
         self.opts_group.grid_columnconfigure(1, weight=1)
 
-        # Progress
         self.prog_group = ttk.LabelFrame(self, text="", padding=10)
         self.prog_group.pack(fill="x", padx=12, pady=(0, 8))
         ttk.Label(self.prog_group, textvariable=self.var_step_text).pack(anchor="w")
         self.progress = ttk.Progressbar(self.prog_group, orient="horizontal", mode="determinate", maximum=100)
         self.progress.pack(fill="x", pady=6)
 
-        # Buttons
         btns = ttk.Frame(self, padding=(12, 0, 12, 0))
         btns.pack(fill="x")
 
@@ -773,7 +835,6 @@ class App(tk.Tk):
         self.btn_clear = ttk.Button(btns, text="", command=self.on_clear)
         self.btn_clear.pack(side="right")
 
-        # Log
         self.log_group = ttk.LabelFrame(self, text="", padding=8)
         self.log_group.pack(fill="both", expand=True, padx=12, pady=10)
 
@@ -785,10 +846,7 @@ class App(tk.Tk):
         self.txt.config(yscrollcommand=sb.set)
 
     def refresh_admin_ui(self):
-        if is_admin():
-            self.btn_admin.config(state="disabled")
-        else:
-            self.btn_admin.config(state="normal")
+        self.btn_admin.config(state="disabled" if is_admin() else "normal")
 
     def update_chkdsk_controls(self):
         enabled = bool(self.var_chkdsk.get())
@@ -802,17 +860,6 @@ class App(tk.Tk):
         self.drive_combo["values"] = drives
         if self.var_drive.get() not in drives:
             self.var_drive.set(drives[0])
-
-    # ---------- Center ----------
-    def center_window(self):
-        self.update_idletasks()
-        w = self.winfo_width()
-        h = self.winfo_height()
-        sw = self.winfo_screenwidth()
-        sh = self.winfo_screenheight()
-        x = (sw // 2) - (w // 2)
-        y = (sh // 2) - (h // 2)
-        self.geometry(f"{w}x{h}+{x}+{y}")
 
     # ---------- log ----------
     def enqueue_log(self, msg: str):
@@ -892,12 +939,16 @@ class App(tk.Tk):
         if self.running:
             return
 
-        # ✅ FIX: reset cancel/skip flags so Start works after Cancel
+        # allow Start after Cancel
         self.runner.reset_all()
 
         steps = self.build_steps()
         if not steps:
-            messagebox.showwarning("Nothing selected", "Select at least one task.", parent=self)
+            messagebox.showwarning(
+                "Nothing selected" if self.lang == "en" else "لا يوجد اختيار",
+                "Select at least one task." if self.lang == "en" else "اختر عملية واحدة على الأقل.",
+                parent=self,
+            )
             return
 
         self.total_steps = len(steps)
@@ -917,12 +968,14 @@ class App(tk.Tk):
         def _ui():
             self.var_step_text.set(f"Step {step_index}/{self.total_steps}: {step_name}")
             self.progress["value"] = pct
+
         self.after(0, _ui)
 
     def finish_progress(self, msg="Done"):
         def _ui():
             self.var_step_text.set(msg)
             self.progress["value"] = 100
+
         self.after(0, _ui)
 
     # ----- step implementations -----
@@ -1004,11 +1057,9 @@ class App(tk.Tk):
         return self.run_command_step(["netsh", "int", "ip", "reset"])
 
     def worker(self, steps):
-        cancelled = False
         try:
             for idx, (name, fn) in enumerate(steps, start=1):
                 if self.runner.cancel_all_requested():
-                    cancelled = True
                     self.enqueue_log("[INFO] Cancelled. Stopping all steps.")
                     self.finish_progress("Cancelled")
                     return
@@ -1017,19 +1068,16 @@ class App(tk.Tk):
                 result = fn()
 
                 if result == "cancel":
-                    cancelled = True
                     self.enqueue_log("[INFO] Cancelled. Stopping all steps.")
                     self.finish_progress("Cancelled")
                     return
 
                 if result == "skip":
                     self.enqueue_log(f"[INFO] Step skipped: {name}")
-                    self.runner._skip_step = False
                     continue
 
             self.finish_progress("Done")
             self.enqueue_log("All selected tasks finished.")
-            # SUCCESS SOUND (only when not cancelled)
             play_success_sound()
 
         except Exception as e:
@@ -1048,10 +1096,11 @@ class App(tk.Tk):
         frame.pack(fill="both", expand=True)
 
         title = "Windows Fixer"
-        sub = ("is a freeware Windows repair & cleanup tool.\n"
-               "Runs SFC, DISM, CHKDSK and safe cleanup tasks.") if self.lang == "en" else (
-              "أداة مجانية لإصلاح وتنظيف ويندوز.\n"
-              "تشغل SFC و DISM و CHKDSK مع عمليات تنظيف آمنة.")
+        sub = (
+            "is a freeware Windows repair & cleanup tool.\nRuns SFC, DISM, CHKDSK and safe cleanup tasks."
+            if self.lang == "en"
+            else "أداة مجانية لإصلاح وتنظيف ويندوز.\nتشغل SFC و DISM و CHKDSK مع عمليات تنظيف آمنة."
+        )
 
         tk.Label(frame, text=title, font=("Segoe UI", 14, "bold")).pack(pady=(0, 4))
         tk.Label(frame, text=sub, wraplength=520, justify="center").pack(pady=(0, 8))
@@ -1068,26 +1117,30 @@ class App(tk.Tk):
 
         email_row = ttk.Frame(frame)
         email_row.pack(pady=(6, 0))
-        tk.Label(email_row, text=("For any feedback contact: " if self.lang == "en" else "للملاحظات تواصل على: ")).pack(side="left")
+        tk.Label(email_row, text=("For any feedback contact: " if self.lang == "en" else "للملاحظات تواصل على: ")).pack(
+            side="left"
+        )
         email_lbl = tk.Label(
             email_row,
             text="ilukezippo@gmail.com",
             fg="#1a73e8",
             cursor="hand2",
-            font=("Segoe UI", 9, "underline")
+            font=("Segoe UI", 9, "underline"),
         )
         email_lbl.pack(side="left")
         email_lbl.bind("<Button-1>", lambda e: webbrowser.open("mailto:ilukezippo@gmail.com"))
 
         link_row = ttk.Frame(frame)
         link_row.pack(pady=(8, 0))
-        tk.Label(link_row, text=("Info and Latest Updates at " if self.lang == "en" else "المعلومات وآخر التحديثات: ")).pack(side="left")
+        tk.Label(link_row, text=("Info and Latest Updates at " if self.lang == "en" else "المعلومات وآخر التحديثات: ")).pack(
+            side="left"
+        )
         link = tk.Label(
             link_row,
             text=GITHUB_PAGE,
             fg="#1a73e8",
             cursor="hand2",
-            font=("Segoe UI", 9, "underline")
+            font=("Segoe UI", 9, "underline"),
         )
         link.pack(side="left")
         link.bind("<Button-1>", lambda e: webbrowser.open(GITHUB_PAGE))
@@ -1106,8 +1159,14 @@ class App(tk.Tk):
             highlightthickness=0,
             cursor="hand2",
             relief="flat",
-            command=lambda: webbrowser.open(DONATE_PAGE)
+            command=lambda: webbrowser.open(DONATE_PAGE),
         ).pack(pady=(12, 0))
+
+        ttk.Button(
+            frame,
+            text=("Check for Update" if self.lang == "en" else "التحقق من التحديث"),
+            command=self.manual_check_for_update,
+        ).pack(pady=(6, 6))
 
         ttk.Button(frame, text=("Close" if self.lang == "en" else "إغلاق"), command=win.destroy).pack(pady=(10, 0))
         self.center_child(win)
@@ -1122,10 +1181,9 @@ if __name__ == "__main__":
     except Exception:
         pass
 
-    # ✅ Auto-run as admin BEFORE creating any Tk window (prevents blank/flicker window)
+    # Auto-run as admin BEFORE any Tk window (if enabled)
     settings = load_settings()
     if bool(settings.get("always_admin", False)) and not is_admin():
         relaunch_as_admin()
 
     App().mainloop()
-
