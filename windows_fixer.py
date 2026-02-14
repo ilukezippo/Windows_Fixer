@@ -107,17 +107,23 @@ def make_donate_image(w=160, h=44):
 
 
 def play_success_sound():
-    # Match your App-Updater behavior: success.wav (lowercase) + fallback beep
+    # Use the helper to find the path in the temp folder
+    # We check for lowercase as the primary target
     wav = resource_path("success.wav")
+
+    # Fallback check for capitalized version
     if not os.path.exists(wav):
         wav = resource_path("Success.wav")
 
     try:
         if os.path.exists(wav):
+            # Use SND_FILENAME and SND_ASYNC to play without freezing the UI
             winsound.PlaySound(wav, winsound.SND_FILENAME | winsound.SND_ASYNC)
         else:
+            # Fallback to a system beep if the file is missing
             winsound.MessageBeep(winsound.MB_ICONASTERISK)
     except Exception:
+        # Silent fail to prevent the app from crashing if audio drivers have issues
         pass
 
 
@@ -444,6 +450,7 @@ class App(tk.Tk):
         # Show window when ready
         self.update_idletasks()
         self.center_window()
+        self.after(50, self.center_window)
         self.deiconify()
         self.lift()
         self.focus_force()

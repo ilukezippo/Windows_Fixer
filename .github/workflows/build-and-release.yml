@@ -30,26 +30,17 @@ jobs:
       - name: Build EXE
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}"
-          if ($tag -eq "main") { $tag = "dev" }
-
           $args = @("--onefile", "--noconsole", "--name", "windows_fixer")
-
-          if (Test-Path "icon.ico") {
-            $args += @("--icon", "icon.ico")
-            $args += @("--add-data", "icon.ico;.")
-          }
-
+          
+          # Force a specific name for the bundled data
+          if (Test-Path "icon.ico") { $args += @("--icon", "icon.ico"); $args += @("--add-data", "icon.ico;.") }
+          if (Test-Path "kuwait.png") { $args += @("--add-data", "kuwait.png;.") }
+          
+          # Bundle the wav file - check for both but bundle as 'success.wav'
           if (Test-Path "Success.wav") {
             $args += @("--add-data", "Success.wav;.")
-          }
-          
-          if (Test-Path "success.wav") {
+          } elseif (Test-Path "success.wav") {
             $args += @("--add-data", "success.wav;.")
-          }
-
-          if (Test-Path "kuwait.png") {
-            $args += @("--add-data", "kuwait.png;.")
           }
 
           pyinstaller @args windows_fixer.py
