@@ -1,4 +1,4 @@
-🛠️ Windows Fixer v1.0.0
+🛠️ Windows Fixer
 
 Windows Fixer is a lightweight Windows repair and cleanup tool with a modern GUI.
 
