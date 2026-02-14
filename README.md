@@ -21,6 +21,7 @@ Scan or Fix mode
 
 Reset Network Stack (Winsock + TCP/IP)
 
+
 🧹 Cleanup Tools
 
 Clean Temporary Files
@@ -53,11 +54,7 @@ Optional "Always Run as Admin"
 
 English / Arabic language support
 
-Plays Success.wav when completed
 
-Custom app icon
-
-About window with Donate button
 
 📦 Requirements
 
