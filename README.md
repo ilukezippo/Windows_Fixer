@@ -33,6 +33,10 @@
   <a href="#build-from-source">Build</a>
 </p>
 
+<p align="center">
+  <img src="shots/main.png" width="760" alt="Windows Fixer main window">
+</p>
+
 <p align="center"><sub>If Windows Fixer saves you time, a ⭐ star on this page helps other people find it.</sub></p>
 
 ---
