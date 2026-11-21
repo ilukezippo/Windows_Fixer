@@ -128,7 +128,7 @@ windows_fixer.py   the whole app (Tkinter + Pillow)
 icon.ico           app icon
 kuwait.png         flag shown in About
 Success.wav        sound played when everything finished
-assets/            pictures for this page
+assets/, shots/    pictures for this page
 ```
 
 ## How it works
