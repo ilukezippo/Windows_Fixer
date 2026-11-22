@@ -70,7 +70,7 @@ jobs:
             echo "Requires Windows 10 or 11. SHA-256: \`${EXE_SHA256}\`"
             echo
             echo "## What's new in $V"
-            awk -v head="## $V" 'index(0 KWD, head) == 1 {on = 1; next} /^## / {if (on) exit} on' CHANGELOG.md | sed 's/^### /#### /'
+            sed -n "/^## $V/,/^## /{/^## /!p}" CHANGELOG.md | sed 's/^### /#### /'
           } > release_notes.md
           cat release_notes.md
 
