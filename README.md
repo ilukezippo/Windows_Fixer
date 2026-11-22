@@ -34,7 +34,7 @@
 </p>
 
 <p align="center">
-  <img src="shots/main.png" width="760" alt="Windows Fixer main window">
+  <img src="shots/main.png" width="760" alt="Windows Fixer: the Diagnose tab after checking the PC">
 </p>
 
 <p align="center"><sub>If Windows Fixer saves you time, a ⭐ star on this page helps other people find it.</sub></p>
@@ -80,6 +80,17 @@ Windows Fixer also checks GitHub for a new version when it starts.
 - the Windows image (DISM CheckHealth, when running as admin)
 
 Anything worth fixing is listed with the steps that fix it.
+
+## Screenshots
+
+| | |
+|---|---|
+| <img src="shots/repair.png" width="400" alt="Repair & Cleanup tab"> | <img src="shots/running.png" width="400" alt="A repair running, with the live log and the progress percentage"> |
+| **Repair & Cleanup:** tick the steps you want | **Log:** every command's output, live, with the percentage |
+| <img src="shots/main_light.png" width="400" alt="Diagnose tab in the light theme"> | <img src="shots/settings.png" width="400" alt="Settings tab"> |
+| **Light theme**, or dark, or the same as Windows | **Settings:** theme, language, restore point, startup check |
+| <img src="shots/about.png" width="400" alt="About tab"> | |
+| **About:** version, more apps, GitHub and Donate | |
 
 ## What it can fix
 
@@ -152,7 +163,7 @@ windows_fixer.py   the whole app (Tkinter + sv-ttk + Pillow)
 icon.ico           app icon
 kuwait.png         flag shown in About
 Success.wav        sound played when everything finished (built into the EXE)
-assets/, shots/    pictures for this page
+assets/, shots/    pictures for this page (shots/: one per tab)
 ```
 
 ## How it works
