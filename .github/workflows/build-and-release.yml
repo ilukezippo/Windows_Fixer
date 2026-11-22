@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
     tags: [ "v*.*.*" ]
-    paths-ignore: [ "*.md", "assets/**" ]
+    paths-ignore: [ "*.md", "assets/**", "shots/**" ]
   workflow_dispatch:
 
 permissions:
@@ -21,82 +21,38 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pillow pyinstaller
+          pip install -r requirements.txt pyinstaller
 
-      - name: Build EXE
+      - name: Build a single EXE
         shell: pwsh
         run: |
-          $args = @("--onefile", "--noconsole", "--name", "windows_fixer")
+          # Everything (icon, flag, sound, theme) goes inside the one EXE
+          $wav = if (Test-Path "success.wav") { "success.wav" } else { "Success.wav" }
+          pyinstaller --noconfirm --onefile --noconsole --name windows_fixer `
+            --icon icon.ico --collect-data sv_ttk `
+            --add-data "icon.ico;." --add-data "kuwait.png;." --add-data "$wav;success.wav" `
+            windows_fixer.py
 
-          # Icon + bundled assets
-          if (Test-Path "icon.ico") {
-            $args += @("--icon", "icon.ico")
-            $args += @("--add-data", "icon.ico;.")
-          }
-          if (Test-Path "kuwait.png") {
-            $args += @("--add-data", "kuwait.png;.")
-          }
-
-          # Bundle wav into EXE as fallback
-          if (Test-Path "success.wav") {
-            $args += @("--add-data", "success.wav;.")
-          } elseif (Test-Path "Success.wav") {
-            $args += @("--add-data", "Success.wav;.")
-          }
-
-          pyinstaller @args windows_fixer.py
-
-          New-Item -ItemType Directory -Force -Path release_out | Out-Null
-
-          # Name the exe nicely for release
           if ("${{ github.ref }}".StartsWith("refs/tags/")) {
-            Copy-Item "dist\windows_fixer.exe" "release_out\WindowsFixer_${{ github.ref_name }}.exe" -Force
+            $exe = "WindowsFixer_${{ github.ref_name }}.exe"
           } else {
-            Copy-Item "dist\windows_fixer.exe" "release_out\WindowsFixer_dev.exe" -Force
+            $exe = "WindowsFixer_dev.exe"
           }
-
-          # ✅ Option A: Put success.wav next to the EXE (portable)
-          if (Test-Path "success.wav") {
-            Copy-Item "success.wav" "release_out\success.wav" -Force
-          } elseif (Test-Path "Success.wav") {
-            Copy-Item "Success.wav" "release_out\success.wav" -Force
-          }
-
-      - name: Create SHA256
-        shell: pwsh
-        run: |
-          if (Test-Path "release_out\SHA256SUMS.txt") { Remove-Item "release_out\SHA256SUMS.txt" -Force }
-
-          $files = Get-ChildItem "release_out" -File
-          foreach ($f in $files) {
-            $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
-            "$hash  $($f.Name)" | Out-File "release_out\SHA256SUMS.txt" -Append -Encoding ascii
-          }
-
-      - name: Zip bundle
-        shell: pwsh
-        run: |
-          if ("${{ github.ref }}".StartsWith("refs/tags/")) {
-            $zip = "WindowsFixer_${{ github.ref_name }}_Windows_x64.zip"
-          } else {
-            $zip = "WindowsFixer_dev_Windows_x64.zip"
-          }
-
-          if (Test-Path $zip) { Remove-Item $zip -Force }
-          Compress-Archive -Path "release_out\*" -DestinationPath $zip -Force
-
-          echo "ZIP_NAME=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+          Copy-Item "dist\windows_fixer.exe" $exe -Force
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          echo "EXE_NAME=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+          echo "EXE_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: Windows_Fixer_Build
-          path: ${{ env.ZIP_NAME }}
+          path: ${{ env.EXE_NAME }}
 
       - name: Release notes (from CHANGELOG.md)
         if: startsWith(github.ref, 'refs/tags/')
@@ -106,15 +62,15 @@ jobs:
         run: |
           V="${TAG#v}"
           {
-            echo "**Repair and clean up Windows, in one window.** DISM, SFC, CHKDSK, network reset and safe cleanup tools, in English and Arabic."
+            echo "**Repair and clean up Windows, in one window.** DISM, SFC, CHKDSK, network reset and safe cleanup tools, with a problem finder. Light and dark themes, English and Arabic."
             echo
-            echo "**Download:** \`WindowsFixer_${TAG}_Windows_x64.zip\` below, unzip it anywhere and run \`WindowsFixer_${TAG}.exe\`. Nothing to install."
+            echo "**Download:** \`WindowsFixer_${TAG}.exe\` below and run it. One file, nothing to install."
             echo "The app is not code-signed yet, so Windows may warn: if Edge holds the download, choose *… → Keep → Show more → Keep anyway*; if SmartScreen warns when you run it, choose *More info → Run anyway*."
             echo
-            echo "Requires Windows 10 or 11."
+            echo "Requires Windows 10 or 11. SHA-256: \`${EXE_SHA256}\`"
             echo
             echo "## What's new in $V"
-            awk -v head="## $V" 'index($0, head) == 1 {on = 1; next} /^## / {if (on) exit} on' CHANGELOG.md | sed 's/^### /#### /'
+            awk -v head="## $V" 'index(0 KWD, head) == 1 {on = 1; next} /^## / {if (on) exit} on' CHANGELOG.md | sed 's/^### /#### /'
           } > release_notes.md
           cat release_notes.md
 
@@ -122,7 +78,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.ZIP_NAME }}
+          files: ${{ env.EXE_NAME }}
           make_latest: true
           body_path: release_notes.md
 
@@ -135,9 +91,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main && git checkout -B main origin/main
-          sed -i -E -e "s#releases/download/v[0-9][^/\"]*/WindowsFixer_v[0-9][^/\")]*_Windows_x64\.zip#releases/download/$TAG/WindowsFixer_${TAG}_Windows_x64.zip#g" \
-                    -e "s#Download WindowsFixer_v[0-9][0-9.]*_Windows_x64\.zip#Download WindowsFixer_${TAG}_Windows_x64.zip#g" \
-                    -e "s#run \*\*WindowsFixer_v[0-9][0-9.]*\.exe\*\*#run **WindowsFixer_${TAG}.exe**#g" README.md
+          sed -i -E -e "s#releases/download/v[0-9][^/\"]*/WindowsFixer_v[0-9][^/\")]*\.exe#releases/download/$TAG/WindowsFixer_${TAG}.exe#g" \
+                    -e "s#Download WindowsFixer_v[0-9][0-9.]*\.exe#Download WindowsFixer_${TAG}.exe#g" README.md
           if git diff --quiet; then echo "buttons already point at $TAG"; exit 0; fi
           git commit -am "Download buttons: Windows Fixer $TAG"
           git push origin main
